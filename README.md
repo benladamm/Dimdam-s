@@ -102,7 +102,7 @@ I'm a full stack developer...
 
 ## Authors
 
-- [@dimdam](https://github.com/benladamm)
+- [@benladamm](https://github.com/benladamm)
 
 
 ## 🔗 Links
