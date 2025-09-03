@@ -1,5 +1,9 @@
-const { readdirSync, lstatSync } = require('node:fs');
-const pathJoin = require('node:path').join;
+const { readdirSync, lstatSync, existsSync, watch } = require('node:fs');
+const path = require('node:path');
+const pathJoin = path.join;
+const { pathToFileURL } = require('node:url');
+let minimatchFn;
+try { minimatchFn = require('minimatch').minimatch; } catch { minimatchFn = null; }
 
 /**
  * Log as a directory tree
@@ -32,10 +36,11 @@ function logDirectoryTree(array, dept=0, padding='│   ') {
  * @param {string} path
  * @returns {(string|object)[]}
  */
-function buildDirectoryTree(path) {
+function buildDirectoryTree(pathInput) {
+    const dirPath = path.isAbsolute(pathInput) ? pathInput : pathJoin(process.cwd(), pathInput);
     const result = [];
-    for (const elt of readdirSync(path)) {
-        const eltPath = pathJoin(path, elt);
+    for (const elt of readdirSync(dirPath)) {
+        const eltPath = pathJoin(dirPath, elt);
         if (lstatSync(eltPath).isDirectory()) {
             result.push({ name: elt, sub: buildDirectoryTree(eltPath) });
         } else  {
@@ -56,9 +61,7 @@ function buildPaths(basePath, directoryTree) {
     for (const elt of directoryTree) {
         switch (typeof elt) {
             case "object":
-                for (const subElt of buildPaths(elt.name, elt.sub)) {
-                    paths.push(pathJoin(basePath, subElt));
-                }
+                paths.push(...buildPaths(pathJoin(basePath, elt.name), elt.sub));
                 break;
             case "string":
                 paths.push(pathJoin(basePath, elt));
@@ -76,23 +79,81 @@ function buildPaths(basePath, directoryTree) {
  * @param {string} basePath
  * @param {boolean} [silent=false] - Whether to log the directory tree or not
  */
-function loader(client, basePath, silent = false) {
-    const directoryTree = buildDirectoryTree(basePath);
-    const paths = buildPaths(basePath, directoryTree);
+async function loadModule(p) {
+    // Support ESM for .mjs
+    if (/\.mjs$/.test(p)) {
+        const mod = await import(pathToFileURL(p).href);
+        return mod.default || mod;
+    }
+    return require(p);
+}
 
-    for (const path of paths) {
+function matchesGlob(p, patterns){
+    if (!patterns || patterns.length === 0 || !minimatchFn) return true;
+    return patterns.some(glob => minimatchFn(p, glob));
+}
+
+async function loader(client, basePath, silent = false, options = {}) {
+    const absoluteBase = path.isAbsolute(basePath) ? basePath : pathJoin(process.cwd(), basePath);
+    if (!existsSync(absoluteBase)) {
+        throw new Error(`Commands folder not found: ${absoluteBase}`);
+    }
+    const directoryTree = buildDirectoryTree(absoluteBase);
+    let paths = buildPaths(absoluteBase, directoryTree)
+        .filter(p => /\.(cjs|mjs|js)$/.test(p));
+    if (options.include && Array.isArray(options.include)) {
+        paths = paths.filter(p => matchesGlob(p, options.include));
+    }
+    if (options.exclude && Array.isArray(options.exclude)) {
+        paths = paths.filter(p => !matchesGlob(p, options.exclude));
+    }
+
+    let loaded = 0;
+    for (const p of paths) {
         try {
-            const command = require(path);
-            client.commands.set(command.name, command);
+            const command = await loadModule(p);
+            if (!command || typeof command.name !== 'string' || command.name.length === 0) {
+                console.warn(`Skipping module without valid 'name': ${p}`);
+            } else if (client && client.commands && typeof client.commands.set === 'function') {
+                client.commands.set(command.name, command);
+            }
+            loaded++;
         } catch (e) {
-            console.error(e);
-            throw new Error('Invalid command at ' + path);
+            console.error('Invalid command at', p, '\n', e);
         }
     }
 
     if (!silent) {
         logDirectoryTree(directoryTree);
+        console.log(`Loaded ${loaded}/${paths.length} modules from ${absoluteBase}`);
     }
+
+    // Watch mode
+    if (options.watch) {
+    const watcher = watch(absoluteBase, { recursive: (process.platform === 'win32' || process.platform === 'darwin') }, async (eventType, filename) => {
+            if (!filename) return;
+            const full = pathJoin(absoluteBase, filename);
+            if (!/\.(cjs|mjs|js)$/.test(full)) return;
+            if (options.include && !matchesGlob(full, options.include)) return;
+            if (options.exclude && matchesGlob(full, options.exclude)) return;
+            try {
+                // clear require cache for CJS
+                if (require.cache[full]) delete require.cache[full];
+                const cmd = await loadModule(full);
+                if (cmd && cmd.name && client && client.commands && typeof client.commands.set === 'function') {
+                    client.commands.set(cmd.name, cmd);
+                    if (!silent) console.log(`Reloaded: ${filename}`);
+                } else if (!silent) {
+                    console.warn(`Changed but no valid command export: ${filename}`);
+                }
+            } catch (e) {
+                console.error('Failed to reload', filename, e);
+            }
+        });
+        if (!silent) console.log('Watch mode enabled');
+        return watcher;
+    }
+    return { loaded, total: paths.length };
 }
 
 module.exports = loader;

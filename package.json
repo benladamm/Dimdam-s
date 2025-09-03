@@ -3,6 +3,21 @@
   "version": "3.2.0",
   "description": "a simple package for discord.js",
   "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./index.js",
+      "types": "./index.d.ts"
+    },
+    "./translator": {
+      "require": "./src/translator/index.js",
+      "types": "./index.d.ts"
+    },
+    "./loader": {
+      "require": "./src/loader/index.js",
+      "types": "./index.d.ts"
+    }
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -20,6 +35,7 @@
   },
   "homepage": "https://github.com/Dimdams/Dimdam-s/",
   "dependencies": {
+    "minimatch": "^9.0.5",
     "node-cache": "^5.1.2",
     "undici": "^6.19.8"
   }

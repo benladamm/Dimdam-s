@@ -36,7 +36,8 @@ const languages = {
     "ht": "Haitian Creole",
     "ha": "Hausa",
     "haw": "Hawaiian",
-    "iw": "Hebrew",
+    "he": "Hebrew",
+    "iw": "Hebrew", // legacy alias
     "hi": "Hindi",
     "hmn": "Hmong",
     "hu": "Hungarian",

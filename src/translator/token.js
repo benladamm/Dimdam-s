@@ -60,11 +60,10 @@ async function updateTKK() {
         const response = await request("https://translate.google.com");
         const body = await response.body.text();
 
-        const code = body.match(/tkk:'\d+.\d+'/g);
+        const code = body.match(/tkk:'\d+\.\d+'/i);
 
-        if (code.length > 0) {
+        if (code && code[0]) {
             const xt = code[0].split(":")[1].replace(/'/g, "");
-
             window.TKK = xt;
             config.set("TKK", xt);
         }
